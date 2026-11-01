@@ -44,6 +44,8 @@ MODE_BOOST = 13
 WRITABLE_MODES = {MODE_FROST, MODE_NIGHT_ECO, MODE_DAY_COMFORT}
 
 REPLY_TIMEOUT = 5.0
+SESSION_TIMEOUT = 90
+DISCONNECT_TIMEOUT = 10
 ACK_TRIES = 10
 
 
@@ -110,6 +112,7 @@ class TimerprogSession:
         self._queue.put_nowait(bytes(data))
 
     async def read(self, obj: tuple[int, int]) -> bytes:
+        _LOGGER.debug("read %s/%s", *obj)
         while not self._queue.empty():
             self._queue.get_nowait()
         await self._client.write_gatt_char(CMD_UUID, bytes([0, *obj]), response=True)
@@ -131,6 +134,7 @@ class TimerprogSession:
         raise TimerprogError(f"no ack for {obj[0]}/{obj[1]}, got {value[:4].hex(' ')}")
 
     async def write(self, obj: tuple[int, int], payload: bytes) -> None:
+        _LOGGER.debug("write %s/%s = %s", obj[0], obj[1], payload.hex())
         await self._client.write_gatt_char(
             BUF_UUID, encode_write_frame(obj, payload), response=True
         )
@@ -171,25 +175,35 @@ class TimerprogClient:
         self._lock = asyncio.Lock()
 
     async def run(self, device: BLEDevice, func):
-        """Open a session, run `await func(session)`, always disconnect."""
+        """Open a session, run `await func(session)`, always disconnect.
+
+        Every D-Bus/GATT call can hang forever when BlueZ loses track of the link,
+        so the whole session is bounded and the disconnect has its own timeout.
+        """
         async with self._lock:
+            client: BleakClient | None = None
             try:
-                client = await establish_connection(
-                    BleakClientWithServiceCache, device, self._name, max_attempts=4
-                )
-            except Exception as err:  # noqa: BLE001
-                raise TimerprogError(f"connection failed: {err}") from err
-            session = TimerprogSession(client)
-            try:
-                await session.start()
-                return await func(session)
+                async with asyncio.timeout(SESSION_TIMEOUT):
+                    _LOGGER.debug("%s: connecting", device.address)
+                    client = await establish_connection(
+                        BleakClientWithServiceCache, device, self._name, max_attempts=3
+                    )
+                    session = TimerprogSession(client)
+                    await session.start()
+                    result = await func(session)
+                    await session.stop()
+                    return result
             except TimerprogError:
                 raise
+            except TimeoutError as err:
+                raise TimerprogError(f"session timed out after {SESSION_TIMEOUT}s") from err
             except Exception as err:  # noqa: BLE001
                 raise TimerprogError(f"{type(err).__name__}: {err}") from err
             finally:
-                await session.stop()
-                try:
-                    await client.disconnect()
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("disconnect failed: %s", err)
+                if client is not None:
+                    try:
+                        async with asyncio.timeout(DISCONNECT_TIMEOUT):
+                            await client.disconnect()
+                    except Exception as err:  # noqa: BLE001
+                        _LOGGER.debug("%s: disconnect failed: %r", device.address, err)
+                    _LOGGER.debug("%s: session closed", device.address)
