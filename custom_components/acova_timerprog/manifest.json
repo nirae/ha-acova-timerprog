@@ -1,0 +1,19 @@
+{
+  "domain": "acova_timerprog",
+  "name": "Acova Timerprog Bluetooth",
+  "bluetooth": [
+    {
+      "connectable": true,
+      "local_name": "TEMPO 3*"
+    }
+  ],
+  "codeowners": ["@nirae"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/nirae/ha-acova-timerprog",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/nirae/ha-acova-timerprog/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

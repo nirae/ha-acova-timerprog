@@ -1,0 +1,82 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Acova Timerprog",
+        "description": "Choisissez le radiateur.",
+        "data": {
+          "address": "Appareil"
+        }
+      },
+      "confirm": {
+        "title": "Acova Timerprog",
+        "description": "Radiateur {address}. Il doit être appairé avec l'adaptateur Bluetooth de Home Assistant (appui long sur 2h puis `bluetoothctl pair`). Un essai de lecture sera fait.",
+        "data": {
+          "name": "Nom"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Radiateur introuvable en Bluetooth (éteint avec ⏻ ?)",
+      "not_paired": "Pas de réponse valide : radiateur non appairé avec cet adaptateur, ou trop loin."
+    },
+    "abort": {
+      "already_configured": "Déjà configuré",
+      "no_devices_found": "Aucun radiateur « TEMPO 3 » détecté"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Acova Timerprog",
+        "data": {
+          "priority": "Qui a le dernier mot",
+          "scan_interval": "Intervalle de relevé (s)"
+        },
+        "data_description": {
+          "priority": "Façade : HA affiche l'état réel et ne réimpose rien après une action sur le boîtier. HA : HA remet son dernier mode au relevé suivant (la marche forcée 2h est toujours respectée).",
+          "scan_interval": "Chaque relevé ouvre une connexion Bluetooth de quelques secondes."
+        }
+      }
+    }
+  },
+  "selector": {
+    "priority": {
+      "options": {
+        "facade": "Façade du radiateur (a)",
+        "ha": "Home Assistant (b)"
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "radiator": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "comfort": "Confort",
+              "eco": "Éco",
+              "boost": "Marche forcée 2h",
+              "auto": "Auto (façade)",
+              "program": "Programme"
+            }
+          }
+        }
+      }
+    },
+    "binary_sensor": {
+      "boost": {
+        "name": "Marche forcée 2h"
+      },
+      "open_window_detection": {
+        "name": "Détection fenêtre ouverte"
+      }
+    }
+  },
+  "exceptions": {
+    "preset_not_settable": {
+      "message": "Le preset {preset} ne se règle que depuis le boîtier."
+    }
+  }
+}

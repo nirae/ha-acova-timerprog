@@ -1,0 +1,82 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Acova Timerprog",
+        "description": "Choose the radiator.",
+        "data": {
+          "address": "Device"
+        }
+      },
+      "confirm": {
+        "title": "Acova Timerprog",
+        "description": "Radiator {address}. It must be bonded with Home Assistant's Bluetooth adapter (long press on 2h, then `bluetoothctl pair`). A test read will be made.",
+        "data": {
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Radiator not seen over Bluetooth (switched off?)",
+      "not_paired": "No valid reply: radiator not bonded with this adapter, or too far."
+    },
+    "abort": {
+      "already_configured": "Already configured",
+      "no_devices_found": "No \"TEMPO 3\" radiator found"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Acova Timerprog",
+        "data": {
+          "priority": "Who has the last word",
+          "scan_interval": "Polling interval (s)"
+        },
+        "data_description": {
+          "priority": "Facade: HA shows the real state and never re-imposes after a change on the unit. HA: HA re-applies its last mode at the next poll (2h boost is always respected).",
+          "scan_interval": "Each poll opens a Bluetooth connection for a few seconds."
+        }
+      }
+    }
+  },
+  "selector": {
+    "priority": {
+      "options": {
+        "facade": "Radiator facade (a)",
+        "ha": "Home Assistant (b)"
+      }
+    }
+  },
+  "entity": {
+    "climate": {
+      "radiator": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "comfort": "Comfort",
+              "eco": "Eco",
+              "boost": "2h boost",
+              "auto": "Auto (facade)",
+              "program": "Program"
+            }
+          }
+        }
+      }
+    },
+    "binary_sensor": {
+      "boost": {
+        "name": "2h boost"
+      },
+      "open_window_detection": {
+        "name": "Open window detection"
+      }
+    }
+  },
+  "exceptions": {
+    "preset_not_settable": {
+      "message": "Preset {preset} can only be set on the unit."
+    }
+  }
+}
