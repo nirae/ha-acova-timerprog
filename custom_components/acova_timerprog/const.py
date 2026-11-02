@@ -2,7 +2,7 @@
 from homeassistant.const import Platform
 
 DOMAIN = "acova_timerprog"
-PLATFORMS = [Platform.CLIMATE, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 CONF_PRIORITY = "priority"
 PRIORITY_FACADE = "facade"  # (a) facade wins: HA reflects, never re-imposes

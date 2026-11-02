@@ -72,6 +72,11 @@
       "open_window_detection": {
         "name": "Détection fenêtre ouverte"
       }
+    },
+    "button": {
+      "refresh": {
+        "name": "Rafraîchir l'état"
+      }
     }
   },
   "exceptions": {
