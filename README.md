@@ -93,6 +93,28 @@ Several devices can be bonded at the same time: the phone app keeps working.
 - Using AcovaControl after Home Assistant re-sends the app's own saved configuration and
   overrides Home Assistant's settings.
 
+## Reliability with host BlueZ
+
+The integration bounds every Bluetooth session, drops stale connections before
+connecting, and keeps retrying, so a failed poll never freezes it: the entity recovers
+on its own once the adapter is healthy.
+
+One case is outside any integration's reach: BlueZ sometimes keeps a **ghost connection**
+(`bluetoothctl info` shows `Connected: yes` with no working transport, and `disconnect`
+times out). The radiator then stops advertising and stays `unavailable` until the
+Bluetooth service or adapter is reset — only the host can do that, not a device
+integration. This is a known BlueZ issue, not specific to this integration, and a weak
+signal makes it much more likely (half-opened connections that die leave ghosts).
+
+If you see it:
+
+- Keep the adapter within good range of the radiator (around −75 dBm or better), or use
+  an **ESPHome Bluetooth proxy** near it — the most robust option, as it takes the host's
+  BlueZ out of the loop. Proxy users rarely hit this at all.
+- On a Linux host using the system BlueZ, you can automate recovery with the sample
+  watchdog in [docs/bluetooth-watchdog/](docs/bluetooth-watchdog/): it restarts
+  `bluetooth.service` when the entity stays unavailable too long.
+
 ## Protocol
 
 See [docs/PROTOCOL.md](docs/PROTOCOL.md).

@@ -1,0 +1,9 @@
+[Unit]
+Description=HA Bluetooth watchdog (restart bluetoothd if a BLE entity is stuck unavailable)
+After=bluetooth.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/ha-bt-watchdog.env
+ExecStart=/usr/local/bin/ha-bt-watchdog.sh
