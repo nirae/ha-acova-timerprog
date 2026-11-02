@@ -17,7 +17,11 @@ from dataclasses import dataclass
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+from bleak_retry_connector import (
+    BleakClientWithServiceCache,
+    close_stale_connections_by_address,
+    establish_connection,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +50,10 @@ WRITABLE_MODES = {MODE_FROST, MODE_NIGHT_ECO, MODE_DAY_COMFORT}
 REPLY_TIMEOUT = 5.0
 SESSION_TIMEOUT = 90
 DISCONNECT_TIMEOUT = 10
+# Must exceed a full session (connect + exchange + disconnect) so a healthy run is
+# never pre-empted; past it we assume the previous session is wedged and give up the
+# attempt (the coordinator retries) instead of blocking every future poll forever.
+LOCK_TIMEOUT = 120
 ACK_TRIES = 10
 
 
@@ -177,33 +185,44 @@ class TimerprogClient:
     async def run(self, device: BLEDevice, func):
         """Open a session, run `await func(session)`, always disconnect.
 
-        Every D-Bus/GATT call can hang forever when BlueZ loses track of the link,
-        so the whole session is bounded and the disconnect has its own timeout.
+        Every D-Bus/GATT call can hang when BlueZ loses track of the link, so the whole
+        session is bounded, the disconnect has its own timeout, and acquiring the session
+        lock is bounded too: if a previous session is wedged in an uninterruptible D-Bus
+        call we give up this attempt rather than freezing every future poll. Any stale
+        connection the host still holds for this address is dropped before connecting, so
+        a phantom "connected" link cannot keep the radiator from advertising.
         """
-        async with self._lock:
-            client: BleakClient | None = None
-            try:
-                async with asyncio.timeout(SESSION_TIMEOUT):
-                    _LOGGER.debug("%s: connecting", device.address)
-                    client = await establish_connection(
-                        BleakClientWithServiceCache, device, self._name, max_attempts=3
-                    )
-                    session = TimerprogSession(client)
-                    await session.start()
-                    result = await func(session)
-                    await session.stop()
-                    return result
-            except TimerprogError:
-                raise
-            except TimeoutError as err:
-                raise TimerprogError(f"session timed out after {SESSION_TIMEOUT}s") from err
-            except Exception as err:  # noqa: BLE001
-                raise TimerprogError(f"{type(err).__name__}: {err}") from err
-            finally:
-                if client is not None:
-                    try:
-                        async with asyncio.timeout(DISCONNECT_TIMEOUT):
-                            await client.disconnect()
-                    except Exception as err:  # noqa: BLE001
-                        _LOGGER.debug("%s: disconnect failed: %r", device.address, err)
-                    _LOGGER.debug("%s: session closed", device.address)
+        try:
+            await asyncio.wait_for(self._lock.acquire(), LOCK_TIMEOUT)
+        except TimeoutError as err:
+            raise TimerprogError(
+                f"previous session still busy after {LOCK_TIMEOUT}s"
+            ) from err
+        client: BleakClient | None = None
+        try:
+            async with asyncio.timeout(SESSION_TIMEOUT):
+                await close_stale_connections_by_address(device.address)
+                _LOGGER.debug("%s: connecting", device.address)
+                client = await establish_connection(
+                    BleakClientWithServiceCache, device, self._name, max_attempts=3
+                )
+                session = TimerprogSession(client)
+                await session.start()
+                result = await func(session)
+                await session.stop()
+                return result
+        except TimerprogError:
+            raise
+        except TimeoutError as err:
+            raise TimerprogError(f"session timed out after {SESSION_TIMEOUT}s") from err
+        except Exception as err:  # noqa: BLE001
+            raise TimerprogError(f"{type(err).__name__}: {err}") from err
+        finally:
+            if client is not None:
+                try:
+                    async with asyncio.timeout(DISCONNECT_TIMEOUT):
+                        await client.disconnect()
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("%s: disconnect failed: %r", device.address, err)
+                _LOGGER.debug("%s: session closed", device.address)
+            self._lock.release()
