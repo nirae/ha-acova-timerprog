@@ -94,7 +94,7 @@ class AcovaClimate(AcovaEntity, ClimateEntity):
         if self._mode == MODE_NIGHT_ECO:
             return self.coordinator.eco_mode_target
         if self._mode in (MODE_FROST, MODE_STANDBY):
-            return FROST_TEMP
+            return None  # frost is not adjustable: no setpoint shown when off
         return data.comfort  # auto / boost / program: what the radiator reports
 
     @property
@@ -142,8 +142,8 @@ class AcovaClimate(AcovaEntity, ClimateEntity):
         elif self._mode == MODE_DAY_COMFORT:
             await self.coordinator.async_command(MODE_DAY_COMFORT, comfort=temp)
         elif self._mode in (MODE_FROST, MODE_STANDBY):
-            # radiator forces 7 °C in frost mode: only remember it for next "heat"
-            await self.coordinator.async_store_comfort(temp)
+            # frost is not adjustable from HA: ignore (the radiator forces 7 °C)
+            return
         else:
             # auto / boost / program from the facade: an explicit HA change means comfort
             await self.coordinator.async_command(MODE_DAY_COMFORT, comfort=temp)
