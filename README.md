@@ -40,7 +40,8 @@ Use an external thermometer if you need `current_temperature` (e.g. with a templ
 | Acova Atoll Spa TSL-050-050-TF (500 W, 2022) | Timerprog Bluetooth | product 2.97, BLE 7.35 |
 
 Other Acova / Zehnder radiators using AcovaControl and advertising `TEMPO 3` should work.
-Reports welcome. "Acova Connect" products use another protocol and are not supported.
+Reports welcome: please open an issue with your radiator model and the firmware versions
+shown on the device page. "Acova Connect" products use another protocol and are not supported.
 
 Requires Home Assistant 2024.12 or later (tested on 2025.11.3), with a working Bluetooth adapter
 or ESPHome Bluetooth proxy within good range of the radiator (around −75 dBm or better).
@@ -49,7 +50,7 @@ or ESPHome Bluetooth proxy within good range of the radiator (around −75 dBm o
 
 ### HACS
 1. HACS → ⋮ → *Custom repositories* → add `https://github.com/nirae/ha-acova-timerprog`,
-   category *Integration*.
+   category *Integration* (not needed once the integration is listed in HACS by default).
 2. Install **Acova Timerprog Bluetooth**, then restart Home Assistant.
 
 ### Manual
