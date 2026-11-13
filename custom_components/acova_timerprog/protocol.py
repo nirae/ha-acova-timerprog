@@ -55,10 +55,17 @@ DISCONNECT_TIMEOUT = 10
 # attempt (the coordinator retries) instead of blocking every future poll forever.
 LOCK_TIMEOUT = 120
 ACK_TRIES = 10
+# A session that fails right after connecting (typically ATT "Unlikely Error" 0x0e while
+# the bonded link is still being encrypted) succeeds when tried again a moment later.
+RETRY_DELAY = 2.0
 
 
 class TimerprogError(Exception):
     """Communication or protocol error."""
+
+
+class TimerprogBusyError(TimerprogError):
+    """A previous session still holds the radiator (not worth retrying right away)."""
 
 
 @dataclass(slots=True)
@@ -183,6 +190,22 @@ class TimerprogClient:
         self._lock = asyncio.Lock()
 
     async def run(self, device: BLEDevice, func):
+        """Run `await func(session)` in a session, trying a second session once on failure.
+
+        Reads and writes are idempotent (a write session re-sends the full setting), so
+        replaying a failed session is safe. A busy lock is not retried: the previous
+        session is wedged and the next poll will try again.
+        """
+        try:
+            return await self._run_once(device, func)
+        except TimerprogBusyError:
+            raise
+        except TimerprogError as err:
+            _LOGGER.debug("%s: session failed (%s), retrying once", device.address, err)
+        await asyncio.sleep(RETRY_DELAY)
+        return await self._run_once(device, func)
+
+    async def _run_once(self, device: BLEDevice, func):
         """Open a session, run `await func(session)`, always disconnect.
 
         Every D-Bus/GATT call can hang when BlueZ loses track of the link, so the whole
@@ -195,7 +218,7 @@ class TimerprogClient:
         try:
             await asyncio.wait_for(self._lock.acquire(), LOCK_TIMEOUT)
         except TimeoutError as err:
-            raise TimerprogError(
+            raise TimerprogBusyError(
                 f"previous session still busy after {LOCK_TIMEOUT}s"
             ) from err
         client: BleakClient | None = None
