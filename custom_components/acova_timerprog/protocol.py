@@ -50,9 +50,8 @@ WRITABLE_MODES = {MODE_FROST, MODE_NIGHT_ECO, MODE_DAY_COMFORT}
 REPLY_TIMEOUT = 5.0
 SESSION_TIMEOUT = 90
 DISCONNECT_TIMEOUT = 10
-# Must exceed a full session (connect + exchange + disconnect) so a healthy run is
-# never pre-empted; past it we assume the previous session is wedged and give up the
-# attempt (the coordinator retries) instead of blocking every future poll forever.
+# Must exceed the longest a session can hold the lock (SESSION_TIMEOUT + DISCONNECT_TIMEOUT,
+# stuck sessions are abandoned) so a command queued behind a poll is never dropped.
 LOCK_TIMEOUT = 120
 ACK_TRIES = 10
 # A session that fails right after connecting (typically ATT "Unlikely Error" 0x0e while
@@ -65,7 +64,7 @@ class TimerprogError(Exception):
 
 
 class TimerprogBusyError(TimerprogError):
-    """A previous session still holds the radiator (not worth retrying right away)."""
+    """The radiator's link is held by a stuck session (not worth retrying right away)."""
 
 
 @dataclass(slots=True)
@@ -206,14 +205,15 @@ class TimerprogClient:
         return await self._run_once(device, func)
 
     async def _run_once(self, device: BLEDevice, func):
-        """Open a session, run `await func(session)`, always disconnect.
+        """Run one session, never longer than SESSION_TIMEOUT + DISCONNECT_TIMEOUT.
 
-        Every D-Bus/GATT call can hang when BlueZ loses track of the link, so the whole
-        session is bounded, the disconnect has its own timeout, and acquiring the session
-        lock is bounded too: if a previous session is wedged in an uninterruptible D-Bus
-        call we give up this attempt rather than freezing every future poll. Any stale
-        connection the host still holds for this address is dropped before connecting, so
-        a phantom "connected" link cannot keep the radiator from advertising.
+        Every D-Bus/GATT call can hang when BlueZ loses track of the link (ghost
+        connection). Cancelling is not enough: when a connect is cancelled, bleak awaits a
+        D-Bus Disconnect without a timeout, and BlueZ never answers it for a ghost
+        connection, so the cancelled session would hang until bluetoothd restarts. The
+        session therefore runs in its own task, which is abandoned if it does not finish
+        in time: the caller and the lock are always released, and the entity goes
+        unavailable (only a bluetooth restart clears the ghost, see the README).
         """
         try:
             await asyncio.wait_for(self._lock.acquire(), LOCK_TIMEOUT)
@@ -221,23 +221,52 @@ class TimerprogClient:
             raise TimerprogBusyError(
                 f"previous session still busy after {LOCK_TIMEOUT}s"
             ) from err
+        try:
+            task = asyncio.ensure_future(self._session(device, func))
+            try:
+                done, _ = await asyncio.wait({task}, timeout=SESSION_TIMEOUT)
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            if done:
+                return task.result()
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=DISCONNECT_TIMEOUT)
+            if not done:
+                _LOGGER.warning(
+                    "%s: Bluetooth session stuck in BlueZ, abandoned "
+                    "(ghost connection: restarting bluetooth clears it)",
+                    device.address,
+                )
+                task.add_done_callback(_discard_result)
+                raise TimerprogBusyError(
+                    f"session stuck in BlueZ after {SESSION_TIMEOUT}s"
+                )
+            raise TimerprogError(f"session timed out after {SESSION_TIMEOUT}s")
+        finally:
+            self._lock.release()
+
+    async def _session(self, device: BLEDevice, func):
+        """Open a session, run `await func(session)`, always disconnect.
+
+        Any stale connection the host still holds for this address is dropped before
+        connecting, so a phantom "connected" link cannot keep the radiator from
+        advertising.
+        """
         client: BleakClient | None = None
         try:
-            async with asyncio.timeout(SESSION_TIMEOUT):
-                await close_stale_connections_by_address(device.address)
-                _LOGGER.debug("%s: connecting", device.address)
-                client = await establish_connection(
-                    BleakClientWithServiceCache, device, self._name, max_attempts=3
-                )
-                session = TimerprogSession(client)
-                await session.start()
-                result = await func(session)
-                await session.stop()
-                return result
+            await close_stale_connections_by_address(device.address)
+            _LOGGER.debug("%s: connecting", device.address)
+            client = await establish_connection(
+                BleakClientWithServiceCache, device, self._name, max_attempts=3
+            )
+            session = TimerprogSession(client)
+            await session.start()
+            result = await func(session)
+            await session.stop()
+            return result
         except TimerprogError:
             raise
-        except TimeoutError as err:
-            raise TimerprogError(f"session timed out after {SESSION_TIMEOUT}s") from err
         except Exception as err:  # noqa: BLE001
             raise TimerprogError(f"{type(err).__name__}: {err}") from err
         finally:
@@ -248,4 +277,9 @@ class TimerprogClient:
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("%s: disconnect failed: %r", device.address, err)
                 _LOGGER.debug("%s: session closed", device.address)
-            self._lock.release()
+
+
+def _discard_result(task: asyncio.Task) -> None:
+    """Retrieve the outcome of an abandoned session so asyncio does not log it."""
+    if not task.cancelled():
+        task.exception()
