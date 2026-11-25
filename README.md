@@ -87,8 +87,9 @@ Several devices can be bonded at the same time: the phone app keeps working.
 - **The power button (⏻) and the "standby" mode switch Bluetooth off.** The integration never
   sends standby; its `off` is frost protection. When the radiator is switched off with ⏻, the
   entities become unavailable until it is switched back on (it then restarts in *auto*).
-- In frost protection the radiator forces 7 °C. The comfort setpoint is remembered by the
-  integration and sent again when heating resumes.
+- Mode changes (heat/off, presets) only write the mode: the radiator keeps its own comfort and
+  eco setpoints, even through frost protection (where it reads 7 °C). Setpoints are written only
+  when you set a temperature from Home Assistant.
 - In eco mode the radiator reports registers that differ from what was written. Like the app,
   the integration keeps the comfort setpoint and shows eco = comfort − 3.5 °C.
 - Using AcovaControl after Home Assistant re-sends the app's own saved configuration and

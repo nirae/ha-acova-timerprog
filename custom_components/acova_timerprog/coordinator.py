@@ -1,6 +1,7 @@
 """Polling coordinator for one Acova Timerprog radiator."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import timedelta
 import logging
@@ -16,7 +17,6 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_PRIORITY,
     CONF_SCAN_INTERVAL,
-    DEFAULT_COMFORT,
     DEFAULT_PRIORITY,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -34,6 +34,8 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
+MODE_SETTLE_TRIES = 6
+MODE_SETTLE_DELAY = 0.5
 
 
 class AcovaCoordinator(DataUpdateCoordinator[TimerprogState]):
@@ -52,15 +54,17 @@ class AcovaCoordinator(DataUpdateCoordinator[TimerprogState]):
         self.priority: str = entry.options.get(CONF_PRIORITY, DEFAULT_PRIORITY)
         self.client = TimerprogClient(entry.title)
         self.firmware: str | None = None
-        # Last comfort setpoint known to be right (read in comfort mode or set by HA).
-        self.comfort_raw: int = temp_to_raw(DEFAULT_COMFORT)
+        # Comfort setpoint known to be right (read in comfort mode or set by HA), None
+        # until then. Only shown and used to compute the eco target: mode changes never
+        # write it, the radiator keeps its own setpoints.
+        self.comfort_raw: int | None = None
         # Last mode commanded from HA (used when priority = ha).
         self.desired_mode: int | None = None
         self._store: Store[dict] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
-        self.comfort_raw = stored.get("comfort_raw", self.comfort_raw)
+        self.comfort_raw = stored.get("comfort_raw")
         self.desired_mode = stored.get("desired_mode")
 
     def _save(self) -> None:
@@ -97,7 +101,7 @@ class AcovaCoordinator(DataUpdateCoordinator[TimerprogState]):
                 self.address, state.mode, self.desired_mode,
             )
             try:
-                state = await self._write(device, self.desired_mode, state)
+                state = await self._write(device, self.desired_mode)
             except TimerprogError as err:
                 _LOGGER.warning("%s: re-apply failed: %s", self.address, err)
         return state
@@ -105,20 +109,39 @@ class AcovaCoordinator(DataUpdateCoordinator[TimerprogState]):
     def _needs_reapply(self, state: TimerprogState) -> bool:
         if self.desired_mode is None or state.mode == MODE_BOOST:
             return False  # 2h boost from the facade is always respected
-        if state.mode != self.desired_mode:
-            return True
-        return state.mode == MODE_DAY_COMFORT and state.comfort_raw != self.comfort_raw
+        return state.mode != self.desired_mode
+
+    @staticmethod
+    async def _settle(session, mode: int) -> TimerprogState:
+        """Read the state, giving the radiator a moment to report the new mode."""
+        state = await session.read_state()
+        for _ in range(MODE_SETTLE_TRIES):
+            if state.mode == mode:
+                break
+            await asyncio.sleep(MODE_SETTLE_DELAY)
+            state = await session.read_state()
+        return state
 
     async def _write(
-        self, device, mode: int, current: TimerprogState | None
+        self, device, mode: int, comfort_raw: int | None = None,
+        current: TimerprogState | None = None,
     ) -> TimerprogState:
-        comfort = self.comfort_raw
-        eco = comfort - 7  # eco = comfort - 3.5 °C, like the app
-        offset = current.offset_raw if current else 0
+        """Write the mode alone, or the full setting when a new comfort is given."""
 
         async def _do(session):
-            await session.write_thermostat(mode, eco, comfort, offset)
-            return await session.read_state()
+            if comfort_raw is None:
+                await session.write_mode(mode)
+            else:
+                eco = comfort_raw - 7  # eco = comfort - 3.5 °C, like the app
+                offset = current.offset_raw if current else 0
+                await session.write_thermostat(mode, eco, comfort_raw, offset)
+            state = await self._settle(session, mode)
+            if state.mode != mode:
+                # A mode change sent seconds after another one can be ignored: send it again.
+                _LOGGER.debug("%s: mode %s not applied, sending it again", self.address, mode)
+                await session.write_mode(mode)
+                state = await self._settle(session, mode)
+            return state
 
         new = await self.client.run(device, _do)
         if self.firmware and not new.firmware:
@@ -129,27 +152,24 @@ class AcovaCoordinator(DataUpdateCoordinator[TimerprogState]):
         """Apply a mode (2, 3 or 4) and optionally a new comfort setpoint."""
         if mode not in WRITABLE_MODES:
             raise ValueError(f"mode {mode} cannot be written")
-        if comfort is not None:
-            self.comfort_raw = temp_to_raw(comfort)
-        self.desired_mode = mode
-        self._save()
+        comfort_raw = temp_to_raw(comfort) if comfort is not None else None
         try:
-            state = await self._write(self._ble_device(), mode, self.data)
+            state = await self._write(self._ble_device(), mode, comfort_raw, self.data)
         except (TimerprogError, UpdateFailed) as err:
             raise HomeAssistantError(str(err)) from err
+        if comfort_raw is not None:
+            self.comfort_raw = comfort_raw
+        if state.mode == MODE_DAY_COMFORT:
+            self.comfort_raw = state.comfort_raw
+        self.desired_mode = mode
+        self._save()
         self.async_set_updated_data(state)
 
-    async def async_store_comfort(self, comfort: float) -> None:
-        """Remember a comfort setpoint without writing (radiator in frost mode)."""
-        self.comfort_raw = temp_to_raw(comfort)
-        self._save()
-        self.async_update_listeners()
+    @property
+    def eco_mode_target(self) -> float | None:
+        return None if self.comfort_raw is None else (self.comfort_raw - 7) / 2
 
     @property
-    def eco_mode_target(self) -> float:
-        return (self.comfort_raw - 7) / 2
-
-    @property
-    def comfort_target(self) -> float:
-        return self.comfort_raw / 2
+    def comfort_target(self) -> float | None:
+        return None if self.comfort_raw is None else self.comfort_raw / 2
 

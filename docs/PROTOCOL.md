@@ -65,7 +65,7 @@ notifications and disconnects. It never keeps the connection open.
 | Value | Meaning | Notes |
 |---|---|---|
 | 1 | standby | **switches Bluetooth off**; only the ⏻ button wakes the radiator |
-| 2 | frost protection | radiator forces comfort = 7 °C, eco = 3.5 °C |
+| 2 | frost protection | registers read comfort = 7 °C, eco = 3.5 °C; the radiator keeps its own setpoints and restores them when leaving frost |
 | 3 | night / eco | |
 | 4 | day / comfort | |
 | 8 | user program | |
@@ -75,3 +75,7 @@ notifications and disconnects. It never keeps the connection open.
 When the app saves settings, it writes in this order: open window control, mode, eco, comfort,
 offset, clock (control = lock, hour, minute, second, day, control = set new clock),
 then the seven days of the week program.
+
+Writing the mode alone (116/3) also works: the radiator switches mode and keeps its own eco and
+comfort setpoints. The integration does that for every mode change and writes mode, eco, comfort
+and offset (like the app) only when a new comfort setpoint is set from Home Assistant.

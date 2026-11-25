@@ -14,7 +14,6 @@ DEFAULT_SCAN_INTERVAL = 300  # seconds
 MIN_SCAN_INTERVAL = 60
 MAX_SCAN_INTERVAL = 3600
 
-DEFAULT_COMFORT = 19.0
 MIN_TEMP = 7.0
 MAX_TEMP = 30.0
 ECO_DELTA = 3.5  # the app always sets eco = comfort - 3.5 °C

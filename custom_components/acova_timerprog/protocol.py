@@ -169,6 +169,12 @@ class TimerprogSession:
             firmware = f"{major}.{minor}"
         return TimerprogState(mode, eco, comfort, offset, window, firmware)
 
+    async def write_mode(self, mode: int) -> None:
+        """Change the mode only: the radiator keeps its own eco/comfort setpoints."""
+        if mode not in WRITABLE_MODES:
+            raise TimerprogError(f"refusing to write mode {mode}")
+        await self.write(OBJ_MODE, bytes([mode]))
+
     async def write_thermostat(
         self, mode: int, eco_raw: int, comfort_raw: int, offset_raw: int
     ) -> None:
