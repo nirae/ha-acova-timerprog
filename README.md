@@ -43,7 +43,7 @@ Other Acova / Zehnder radiators using AcovaControl and advertising `TEMPO 3` sho
 Reports welcome: please open an issue with your radiator model and the firmware versions
 shown on the device page. "Acova Connect" products use another protocol and are not supported.
 
-Requires Home Assistant 2024.12 or later (tested on 2025.11.3), with a working Bluetooth adapter
+Requires Home Assistant 2026.11 or later (tested on 2026.11.3), with a working Bluetooth adapter
 or ESPHome Bluetooth proxy within good range of the radiator (around −75 dBm or better).
 
 ## Installation
