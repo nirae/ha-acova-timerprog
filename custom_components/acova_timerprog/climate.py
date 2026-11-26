@@ -51,7 +51,7 @@ async def async_setup_entry(
 class AcovaClimate(AcovaEntity, ClimateEntity):
     _attr_name = None
     _attr_translation_key = "radiator"
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
@@ -87,7 +87,7 @@ class AcovaClimate(AcovaEntity, ClimateEntity):
         return presets
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         data = self.coordinator.data
         if self._mode == MODE_DAY_COMFORT:
             return data.comfort
